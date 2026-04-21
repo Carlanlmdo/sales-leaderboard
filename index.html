@@ -386,8 +386,8 @@
   let tab = 'weekly', view = 'employee', data = [], refreshTimer = null;
 
   function ini(n) { return n.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(); }
-  function fmt(v,t) { return t==='membership' ? v+' mbr' : '$'+Number(v).toLocaleString(); }
-  function field(t) { return t==='weekly'?'WeeklySales':t==='monthly'?'MonthlySales':'MembershipSales'; }
+  function fmt(v,t) { if(t==='membership') return Math.round(Number(v))+' mbr'; const n=Number(v)||0; return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function field(t) { return t==='weekly'?'Weekly Sales':t==='monthly'?'Monthly Sales':'Membership Sales'; }
 
   function setTab(t,el) { tab=t; document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); el.classList.add('active'); render(); }
   function setView(v,el) { view=v; document.querySelectorAll('.vtab').forEach(x=>x.classList.remove('active')); el.classList.add('active'); render(); }
@@ -409,10 +409,12 @@
     const top = rows[0] ? (Number(rows[0][f])||1) : 1;
     const avg = rows.length ? Math.round(total/rows.length) : 0;
 
+    const tabLabel = tab==='weekly'?'Weekly':tab==='monthly'?'Monthly':'Membership';
+    const viewLabel = view==='store'?'Store':'Employee';
     document.getElementById('summary').innerHTML = `
-      <div class="s-card"><div class="s-card-label">Top Performer</div><div class="s-card-value" style="font-size:16px;font-family:'DM Sans',sans-serif;font-weight:500;letter-spacing:0;">${rows[0]?rows[0].Name:'--'}</div></div>
-      <div class="s-card"><div class="s-card-label">Total</div><div class="s-card-value gold">${fmt(total,tab)}</div></div>
-      <div class="s-card"><div class="s-card-label">Average</div><div class="s-card-value">${fmt(avg,tab)}</div></div>`;
+      <div class="s-card"><div class="s-card-label">Top ${viewLabel}</div><div class="s-card-value" style="font-size:15px;font-family:'DM Sans',sans-serif;font-weight:500;letter-spacing:0;">${rows[0]?rows[0].Name:'--'}</div></div>
+      <div class="s-card"><div class="s-card-label">Total ${tabLabel} Sales</div><div class="s-card-value gold">${fmt(total,tab)}</div></div>
+      <div class="s-card"><div class="s-card-label">Avg per ${viewLabel}</div><div class="s-card-value">${fmt(avg,tab)}</div></div>`;
 
     const top3 = rows.slice(0,3);
     const podiumOrder = top3.length>=3 ? [top3[1],top3[0],top3[2]] : top3.length===2 ? [top3[1],top3[0]] : top3;
@@ -492,7 +494,7 @@
       const row = {};
       headers.forEach((h, j) => row[h] = (vals[j] || '').trim());
       // Strip $, commas from numeric fields
-      ['WeeklySales','MonthlySales','MembershipSales'].forEach(k => {
+      ['Weekly Sales','Monthly Sales','Membership Sales'].forEach(k => {
         if (row[k] !== undefined) row[k] = row[k].replace(/[$,\s]/g, '');
       });
       if (row['Name'] && row['Name'].trim()) result.push(row);
