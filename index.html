@@ -358,6 +358,7 @@
 </div>
 
 <script>
+
   const COLORS = [
     ['#3266ad','rgba(50,102,173,0.15)'],
     ['#C2594A','rgba(194,89,74,0.15)'],
@@ -408,25 +409,21 @@
     const top = rows[0] ? (Number(rows[0][f])||1) : 1;
     const avg = rows.length ? Math.round(total/rows.length) : 0;
 
-    // Summary
     document.getElementById('summary').innerHTML = `
-      <div class="s-card"><div class="s-card-label">Top Performer</div><div class="s-card-value" style="font-size:16px;font-family:'DM Sans',sans-serif;font-weight:500;letter-spacing:0;">${rows[0]?rows[0].Name:'—'}</div></div>
+      <div class="s-card"><div class="s-card-label">Top Performer</div><div class="s-card-value" style="font-size:16px;font-family:'DM Sans',sans-serif;font-weight:500;letter-spacing:0;">${rows[0]?rows[0].Name:'--'}</div></div>
       <div class="s-card"><div class="s-card-label">Total</div><div class="s-card-value gold">${fmt(total,tab)}</div></div>
       <div class="s-card"><div class="s-card-label">Average</div><div class="s-card-value">${fmt(avg,tab)}</div></div>`;
 
-    // Podium
     const top3 = rows.slice(0,3);
     const podiumOrder = top3.length>=3 ? [top3[1],top3[0],top3[2]] : top3.length===2 ? [top3[1],top3[0]] : top3;
     const podiumClasses = top3.length>=3 ? ['p2','p1','p3'] : top3.length===2 ? ['p2','p1'] : ['p1'];
-    const crowns = ['🥈','🥇','🥉'];
-    const crownMap = top3.length>=3 ? [1,0,2] : [1,0];
+    const medals = ['\u{1F947}','\u{1F948}','\u{1F949}'];
 
     document.getElementById('podium').innerHTML = podiumOrder.map((r,i)=>{
       const pc = podiumClasses[i];
       const origIdx = pc==='p1'?0:pc==='p2'?1:2;
       const si = stores.indexOf(r.Store); const [ac,abg] = COLORS[si%COLORS.length];
       const sub = view==='store' ? `${r.count||''} employees` : r.Store;
-      const medals = ['🥇','🥈','🥉'];
       return `<div class="podium-item ${pc}">
         <div class="podium-crown">${medals[origIdx]}</div>
         <div class="podium-avatar" style="background:${abg};color:${ac};">${ini(r.Name)}</div>
@@ -437,7 +434,6 @@
       </div>`;
     }).join('');
 
-    // Board (rank 4+)
     const rest = rows.slice(3);
     if (!rest.length && rows.length <= 3) { document.getElementById('board').innerHTML=''; return; }
     document.getElementById('board').innerHTML = rest.map((r,i)=>{
@@ -456,164 +452,137 @@
     }).join('');
   }
 
-  function cleanNum(v) {
-    return String(v).replace(/["'\$,\s]/g,'');
-  }
-
+  // Robust CSV parser that handles quoted fields containing commas
   function parseCSV(text) {
-    const rows = [];
+    const result = [];
     const lines = text.trim().split(/\r?\n/);
-    if (lines.length < 2) return [];
+    if (lines.length < 2) return result;
 
-    function parseLine(line) {
+    function tokenize(line) {
       const fields = [];
-      let i = 0;
-      while (i < line.length) {
-        if (line[i] === '"') {
-          let val = ''; i++;
-          while (i < line.length) {
-            if (line[i] === '"' && line[i+1] === '"') { val += '"'; i += 2; }
-            else if (line[i] === '"') { i++; break; }
-            else { val += line[i++]; }
+      let pos = 0;
+      while (pos <= line.length) {
+        if (line[pos] === '"') {
+          pos++;
+          let val = '';
+          while (pos < line.length) {
+            if (line[pos] === '"') {
+              pos++;
+              if (line[pos] === '"') { val += '"'; pos++; }
+              else break;
+            } else { val += line[pos++]; }
           }
           fields.push(val.trim());
-          if (line[i] === ',') i++;
+          if (line[pos] === ',') pos++;
         } else {
           let val = '';
-          while (i < line.length && line[i] !== ',') val += line[i++];
-          fields.push(val.trim());
-          if (line[i] === ',') i++;
+          while (pos < line.length && line[pos] !== ',') val += line[pos++];
+          fields.push(val.trim().replace(/^"|"$/g, ''));
+          if (line[pos] === ',') pos++;
+          else pos++;
         }
       }
       return fields;
     }
 
-    const headers = parseLine(lines[0]).map(h => h.replace(/^"|"$/g,'').trim());
-    for (let li = 1; li < lines.length; li++) {
-      if (!lines[li].trim()) continue;
-      const vals = parseLine(lines[li]);
-      const obj = {};
-      headers.forEach((h, i) => obj[h] = (vals[i] || '').replace(/^"|"$/g,'').trim());
-      ['WeeklySales','MonthlySales','MembershipSales'].forEach(f => {
-        if (obj[f]) obj[f] = cleanNum(obj[f]);
+    const headers = tokenize(lines[0]).map(h => h.trim());
+    for (let i = 1; i < lines.length; i++) {
+      if (!lines[i].trim()) continue;
+      const vals = tokenize(lines[i]);
+      const row = {};
+      headers.forEach((h, j) => row[h] = (vals[j] || '').trim());
+      // Strip $, commas from numeric fields
+      ['WeeklySales','MonthlySales','MembershipSales'].forEach(k => {
+        if (row[k] !== undefined) row[k] = row[k].replace(/[$,\s]/g, '');
       });
-      if (obj.Name && obj.Name.trim()) rows.push(obj);
+      if (row['Name'] && row['Name'].trim()) result.push(row);
     }
-    return rows;
-  }
-
-  function stripProxy(u) {
-    try { u = decodeURIComponent(u); } catch(e) {}
-    return u.replace(/^https:\/\/corsproxy\.io\/\??/i,'')
-            .replace(/^https:\/\/api\.allorigins\.win\/raw\?url=/i,'')
-            .replace(/^https:\/\/api\.codetabs\.com\/v1\/proxy\?quest=/i,'');
+    return result;
   }
 
   async function loadSheet() {
-    const urlInput = document.getElementById('sheetUrl').value.trim() || localStorage.getItem('sheetUrl') || '';
-    if (!urlInput) { render(); return; }
+    const raw = (document.getElementById('sheetUrl').value.trim() || localStorage.getItem('sheetUrl') || '').trim();
+    if (!raw) { render(); return; }
 
-    const base = stripProxy(urlInput);
-    document.getElementById('sheetUrl').value = base;
-    localStorage.setItem('sheetUrl', base);
-    document.getElementById('savedUrlDisplay').textContent = base;
+    // Always use the bare Google URL — strip any proxy prefix the user may have added
+    let baseUrl = raw;
+    try { baseUrl = decodeURIComponent(baseUrl); } catch(e) {}
+    baseUrl = baseUrl
+      .replace(/^https?:\/\/corsproxy\.io\/\??/i, '')
+      .replace(/^https?:\/\/api\.allorigins\.win\/raw\?url=/i, '')
+      .replace(/^https?:\/\/api\.codetabs\.com\/v1\/proxy\?quest=/i, '');
+
+    document.getElementById('sheetUrl').value = baseUrl;
+    localStorage.setItem('sheetUrl', baseUrl);
+    document.getElementById('savedUrlDisplay').textContent = baseUrl;
 
     const status = document.getElementById('gsStatus');
     status.className = 'setup-status';
-    status.innerHTML = '<span class="spin">\u21BB</span> Fetching your sheet...';
+    status.innerHTML = '\u21BB Connecting...';
 
-    const attempts = [
-      base,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(base)}`,
-      `https://corsproxy.io/?${encodeURIComponent(base)}`,
-      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(base)}`,
+    // Try multiple strategies in order
+    const proxyUrls = [
+      baseUrl,
+      'https://api.allorigins.win/raw?url=' + encodeURIComponent(baseUrl),
+      'https://corsproxy.io/?' + encodeURIComponent(baseUrl),
+      'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(baseUrl),
     ];
 
     let csvText = null;
-    let lastErr = '';
-    for (const url of attempts) {
+    let debugInfo = '';
+
+    for (const url of proxyUrls) {
       try {
-        const res = await fetch(url, {signal: AbortSignal.timeout(10000)});
-        if (!res.ok) { lastErr = 'HTTP ' + res.status; continue; }
-        const t = await res.text();
-        if (t && !t.trim().startsWith('<') && t.includes('\n')) { csvText = t; break; }
-        lastErr = 'Got HTML instead of CSV';
-      } catch(e) { lastErr = e.message; continue; }
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 12000);
+        const res = await fetch(url, { signal: controller.signal });
+        clearTimeout(timer);
+        if (!res.ok) { debugInfo += `[${res.status}] `; continue; }
+        const txt = await res.text();
+        // Must look like CSV: has commas, multiple lines, no HTML tags
+        if (txt && txt.length > 10 && !txt.trim().startsWith('<') && txt.includes(',')) {
+          csvText = txt;
+          break;
+        }
+        debugInfo += '[not CSV] ';
+      } catch(e) {
+        debugInfo += `[${e.message.slice(0,20)}] `;
+        continue;
+      }
     }
 
     if (!csvText) {
       status.className = 'setup-status err';
-      status.textContent = '\u2715 Could not fetch sheet. Error: ' + lastErr;
+      status.textContent = '\u2715 All fetch attempts failed. Debug: ' + debugInfo + ' \u2014 Make sure your sheet is published as CSV and publicly accessible.';
       return;
     }
 
-    const parsed = parseCSV(csvText);
-    if (!parsed.length) {
+    const rows = parseCSV(csvText);
+
+    if (!rows.length) {
       status.className = 'setup-status err';
-      status.textContent = '\u2715 Parsed 0 rows. Raw CSV start: ' + csvText.slice(0,150);
+      status.textContent = '\u2715 Fetched but 0 rows parsed. First 200 chars: ' + csvText.slice(0, 200);
       return;
     }
 
-    data = parsed;
+    // Check if values are actually loading
+    const sample = rows[0];
+    if (!sample.WeeklySales && !sample.MonthlySales) {
+      status.className = 'setup-status err';
+      status.textContent = '\u2715 Names loaded but no sales data. Column headers found: ' + Object.keys(sample).join(', ');
+      return;
+    }
+
+    data = rows;
     document.getElementById('lastUpdated').textContent = 'Live \u00B7 Updated ' + new Date().toLocaleTimeString();
     status.className = 'setup-status ok';
-    status.textContent = '\u2713 Connected \u2014 ' + parsed.length + ' employees across ' + [...new Set(parsed.map(r=>r.Store))].length + ' stores';
+    status.textContent = '\u2713 Connected \u2014 ' + rows.length + ' employees across ' + [...new Set(rows.map(r=>r.Store))].length + ' stores';
     render();
     if (refreshTimer) clearInterval(refreshTimer);
-    refreshTimer = setInterval(loadSheet, 5*60*1000);
+    refreshTimer = setInterval(loadSheet, 5 * 60 * 1000);
   }
 
-  async function loadSheet() {
-    const urlInput = document.getElementById('sheetUrl').value.trim() || localStorage.getItem('sheetUrl') || '';
-    if (!urlInput) { render(); return; }
-
-    document.getElementById('sheetUrl').value = urlInput;
-    localStorage.setItem('sheetUrl', urlInput);
-    document.getElementById('savedUrlDisplay').textContent = urlInput;
-
-    const status = document.getElementById('gsStatus');
-    status.className = 'setup-status';
-    status.innerHTML = '<span class="spin">↻</span> Fetching your sheet...';
-
-    const proxies = [
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(urlInput)}`,
-      `https://corsproxy.io/?${encodeURIComponent(urlInput)}`,
-      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(urlInput)}`,
-    ];
-
-    let csvText = null;
-    for (const proxy of proxies) {
-      try {
-        const res = await fetch(proxy, {signal: AbortSignal.timeout(8000)});
-        if (!res.ok) continue;
-        const t = await res.text();
-        if (t && t.includes(',') && t.split('\n').length > 1 && !t.includes('<html')) { csvText = t; break; }
-      } catch(e) { continue; }
-    }
-
-    if (!csvText) {
-      status.className = 'setup-status err';
-      status.innerHTML = '✕ Could not fetch. Try opening this file directly in your browser (not from Claude) — the proxies work fine outside the sandbox.';
-      return;
-    }
-
-    const parsed = parseCSV(csvText);
-    if (!parsed.length || !parsed[0].Name) {
-      status.className = 'setup-status err';
-      status.textContent = '✕ Connected but no valid data. Check column headers: Name, Store, WeeklySales, MonthlySales, MembershipSales';
-      return;
-    }
-
-    data = parsed;
-    document.getElementById('lastUpdated').textContent = 'Live · Updated ' + new Date().toLocaleTimeString();
-    status.className = 'setup-status ok';
-    status.textContent = '✓ Connected — ' + parsed.length + ' employees across ' + [...new Set(parsed.map(r=>r.Store))].length + ' stores';
-    render();
-    if (refreshTimer) clearInterval(refreshTimer);
-    refreshTimer = setInterval(loadSheet, 5*60*1000);
-  }
-
-  // Restore saved URL on load
+  // Restore saved URL on page load
   const saved = localStorage.getItem('sheetUrl');
   if (saved) {
     document.getElementById('sheetUrl').value = saved;
@@ -622,6 +591,7 @@
   }
 
   render();
+
 </script>
 </body>
 </html>
