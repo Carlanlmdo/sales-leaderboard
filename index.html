@@ -456,6 +456,10 @@
     }).join('');
   }
 
+  function cleanNum(v) {
+    return String(v).replace(/[\$,\s]/g,'');
+  }
+
   function parseCSV(text) {
     const lines = text.trim().split(/\r?\n/);
     if (lines.length < 2) return [];
@@ -465,6 +469,8 @@
       for(let c of line){ if(c==='"'){inQ=!inQ;}else if(c===','&&!inQ){vals.push(cur.trim());cur='';}else{cur+=c;} }
       vals.push(cur.trim());
       const obj={}; headers.forEach((h,i)=>obj[h]=(vals[i]||'').replace(/^"|"$/g,''));
+      // Clean numeric fields
+      ['WeeklySales','MonthlySales','MembershipSales'].forEach(f=>{ if(obj[f]) obj[f]=cleanNum(obj[f]); });
       return obj;
     }).filter(r=>r.Name&&r.Name.trim());
   }
