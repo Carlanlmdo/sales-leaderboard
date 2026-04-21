@@ -457,22 +457,110 @@
   }
 
   function cleanNum(v) {
-    return String(v).replace(/[\$,\s]/g,'');
+    return String(v).replace(/["'\$,\s]/g,'');
   }
 
   function parseCSV(text) {
+    const rows = [];
     const lines = text.trim().split(/\r?\n/);
     if (lines.length < 2) return [];
-    const headers = lines[0].split(',').map(h=>h.trim().replace(/^"|"$/g,''));
-    return lines.slice(1).map(line=>{
-      const vals=[]; let cur='', inQ=false;
-      for(let c of line){ if(c==='"'){inQ=!inQ;}else if(c===','&&!inQ){vals.push(cur.trim());cur='';}else{cur+=c;} }
-      vals.push(cur.trim());
-      const obj={}; headers.forEach((h,i)=>obj[h]=(vals[i]||'').replace(/^"|"$/g,''));
-      // Clean numeric fields
-      ['WeeklySales','MonthlySales','MembershipSales'].forEach(f=>{ if(obj[f]) obj[f]=cleanNum(obj[f]); });
-      return obj;
-    }).filter(r=>r.Name&&r.Name.trim());
+
+    function parseLine(line) {
+      const fields = [];
+      let i = 0;
+      while (i < line.length) {
+        if (line[i] === '"') {
+          let val = ''; i++;
+          while (i < line.length) {
+            if (line[i] === '"' && line[i+1] === '"') { val += '"'; i += 2; }
+            else if (line[i] === '"') { i++; break; }
+            else { val += line[i++]; }
+          }
+          fields.push(val.trim());
+          if (line[i] === ',') i++;
+        } else {
+          let val = '';
+          while (i < line.length && line[i] !== ',') val += line[i++];
+          fields.push(val.trim());
+          if (line[i] === ',') i++;
+        }
+      }
+      return fields;
+    }
+
+    const headers = parseLine(lines[0]).map(h => h.replace(/^"|"$/g,'').trim());
+    for (let li = 1; li < lines.length; li++) {
+      if (!lines[li].trim()) continue;
+      const vals = parseLine(lines[li]);
+      const obj = {};
+      headers.forEach((h, i) => obj[h] = (vals[i] || '').replace(/^"|"$/g,'').trim());
+      ['WeeklySales','MonthlySales','MembershipSales'].forEach(f => {
+        if (obj[f]) obj[f] = cleanNum(obj[f]);
+      });
+      if (obj.Name && obj.Name.trim()) rows.push(obj);
+    }
+    return rows;
+  }
+
+  function stripProxy(u) {
+    try { u = decodeURIComponent(u); } catch(e) {}
+    return u.replace(/^https:\/\/corsproxy\.io\/\??/i,'')
+            .replace(/^https:\/\/api\.allorigins\.win\/raw\?url=/i,'')
+            .replace(/^https:\/\/api\.codetabs\.com\/v1\/proxy\?quest=/i,'');
+  }
+
+  async function loadSheet() {
+    const urlInput = document.getElementById('sheetUrl').value.trim() || localStorage.getItem('sheetUrl') || '';
+    if (!urlInput) { render(); return; }
+
+    const base = stripProxy(urlInput);
+    document.getElementById('sheetUrl').value = base;
+    localStorage.setItem('sheetUrl', base);
+    document.getElementById('savedUrlDisplay').textContent = base;
+
+    const status = document.getElementById('gsStatus');
+    status.className = 'setup-status';
+    status.innerHTML = '<span class="spin">\u21BB</span> Fetching your sheet...';
+
+    const attempts = [
+      base,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(base)}`,
+      `https://corsproxy.io/?${encodeURIComponent(base)}`,
+      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(base)}`,
+    ];
+
+    let csvText = null;
+    let lastErr = '';
+    for (const url of attempts) {
+      try {
+        const res = await fetch(url, {signal: AbortSignal.timeout(10000)});
+        if (!res.ok) { lastErr = 'HTTP ' + res.status; continue; }
+        const t = await res.text();
+        if (t && !t.trim().startsWith('<') && t.includes('\n')) { csvText = t; break; }
+        lastErr = 'Got HTML instead of CSV';
+      } catch(e) { lastErr = e.message; continue; }
+    }
+
+    if (!csvText) {
+      status.className = 'setup-status err';
+      status.textContent = '\u2715 Could not fetch sheet. Error: ' + lastErr;
+      return;
+    }
+
+    const parsed = parseCSV(csvText);
+    if (!parsed.length) {
+      status.className = 'setup-status err';
+      status.textContent = '\u2715 Parsed 0 rows. Raw CSV start: ' + csvText.slice(0,150);
+      return;
+    }
+
+    data = parsed;
+    document.getElementById('lastUpdated').textContent = 'Live \u00B7 Updated ' + new Date().toLocaleTimeString();
+    status.className = 'setup-status ok';
+    status.textContent = '\u2713 Connected \u2014 ' + parsed.length + ' employees across ' + [...new Set(parsed.map(r=>r.Store))].length + ' stores';
+    render();
+    if (refreshTimer) clearInterval(refreshTimer);
+    refreshTimer = setInterval(loadSheet, 5*60*1000);
   }
 
   async function loadSheet() {
